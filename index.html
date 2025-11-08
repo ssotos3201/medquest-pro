@@ -188,9 +188,8 @@ let state = {
   users:[
     { id:1,email:'admin@medquest.com',password:'admin123',role:'admin',name:'Admin User',subscription:'premium',permissions:{'*':true},superadmin:true },
     { id:2,email:'user@example.com',password:'user123',role:'user',name:'John Doe',subscription:'basic',permissions:{...ROLE_PRESETS.user} },
-    { id:3,email:'staff@ucy.ac.cy',password:'staff123',role:'ucy_staff',name:'UCY Staff',subscription:null,permissions:{...ROLE_PRESETS.ucy_staff} },
-    { id:4,email:'tutor@ucy.ac.cy',password:'tutor123',role:'ucy_tutor',name:'UCY Tutor',subscription:null,permissions:{...ROLE_PRESETS.ucy_tutor} },
-    { id:5,email:'student@ucy.ac.cy',password:'student123',role:'ucy_student',name:'UCY Student',subscription:null,permissions:{...ROLE_PRESETS.ucy_student} }
+    { id:3,email:'tutor@ucy.ac.cy',password:'tutor123',role:'ucy_tutor',name:'UCY Tutor',subscription:null,permissions:{...ROLE_PRESETS.ucy_tutor} },
+    { id:4,email:'student@ucy.ac.cy',password:'student123',role:'ucy_student',name:'UCY Student',subscription:null,permissions:{...ROLE_PRESETS.ucy_student} }
   ],
   students:[{ studentId:'S-2001', name:'Eleni Christou', email:'eleni@ucy.ac.cy', year:'4', course:'MBBS', notes:'OSCE prep group A' }],
   ucyDocs:[],
@@ -308,14 +307,6 @@ function showLogin(){
       </div>
       <div style="margin-top:12px"><button class="btn btn-primary" style="width:100%">Login</button></div>
     </form>
-    <div style="margin-top:12px;font-size:13px;background:#eff6ff;padding:10px;border-radius:10px">
-      <div class="u-row">
-        <div><span class="pill">Super Admin</span> admin@medquest.com / admin123</div>
-        <div><span class="pill">UCY Staff</span> staff@ucy.ac.cy / staff123</div>
-        <div><span class="pill">UCY Tutor</span> tutor@ucy.ac.cy / tutor123</div>
-        <div><span class="pill">UCY Student</span> student@ucy.ac.cy / student123</div>
-      </div>
-    </div>
   </div>`;
 }
 function handleLogin(e){
@@ -1677,5 +1668,6 @@ function sudoRevert(){ if(!state.sudoOriginalUser) return; state.currentUser=sta
 </script>
 </body>
 </html>
+
 
 
