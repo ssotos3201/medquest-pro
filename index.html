@@ -66,6 +66,9 @@
   .delta-up{color:#065f46;font-weight:800}
   .delta-down{color:#991b1b;font-weight:800}
 </style>
+
+<!-- ✅ Load Supabase client -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 <div class="container">
@@ -78,8 +81,7 @@
   </div>
   <div class="main-content" id="mainContent"></div>
 </div>
-const SUPABASE_URL = "https://vvcymegonxwjkmcruxek.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2Y3ltZWdvbnh3amttY3J1eGVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI2MTA2MjcsImV4cCI6MjA3ODE4NjYyN30.SA3esiKtlaKVz8V1cBWgVtsps6vg55jlZpWao9jynFM";
+
 
 <!-- Admin Modal -->
 <div id="modal" style="display:none;position:fixed;inset:0;z-index:1000;align-items:center;justify-content:center;background:rgba(0,0,0,.45)">
@@ -116,6 +118,12 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 </div>
 
 <script>
+/* ============================== SUPABASE (keys inside script) ============================== */
+const SUPABASE_URL = "https://vvcymegonxwjkmcruxek.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2Y3ltZWdvbnh3amttY3J1eGVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI2MTA2MjcsImV4cCI6MjA3ODE4NjYyN30.SA3esiKtlaKVz8V1cBWgVtsps6vg55jlZpWao9jynFM";
+const sb = window.supabase?.createClient?.(SUPABASE_URL, SUPABASE_ANON_KEY);
+/* (Optional) You can later replace localStorage saves with Supabase CRUD using `sb` */
+
 /* ============================== ROLES / PERMS ============================== */
 const ROLE_PRESETS = {
   admin: {'*':true, superadmin:true},
@@ -201,7 +209,7 @@ let state = {
     { id:'pro',name:'Professional',price:39.99,features:['Unlimited questions','Detailed explanations','Custom quizzes','Offline mode','Priority support'],featured:true },
     { id:'premium',name:'Premium',price:59.99,features:['Everything in Pro','Video explanations','Live webinars','Personal coach','Exam simulations','Certificate of completion'],featured:false }
   ],
-  attempts:[],  // NEW: per-question attempts {userId,qid,category,section,correct:boolean,ts}
+  attempts:[],  // per-question attempts {userId,qid,category,section,correct:boolean,ts}
   auditLog:[]
 };
 
@@ -228,7 +236,6 @@ function init(){
       if(parsed.features) state.features={...state.features, ...parsed.features};
     }catch(_){}
   }
-  // restore attempts (persist lightweight history)
   const savedAttempts=localStorage.getItem('attemptsLog');
   if(savedAttempts){ try{ state.attempts=JSON.parse(savedAttempts)||[]; }catch{} }
   seedDemoBannerOnce();
@@ -386,7 +393,7 @@ function showDashboard(){
     </div>`;
 }
 
-/* ============================== QUESTION BANK (unchanged core + attempt logging) ============================== */
+/* ============================== QUESTION BANK (practice + manage + logging) ============================== */
 function showBank(){
   const c=document.getElementById('mainContent');
   c.innerHTML=`
@@ -513,7 +520,6 @@ function submitQuiz(){
   const q=quiz.list[quiz.idx];
   const sel=quiz.answers[q.id];
   if(sel==null){ return; }
-  // show explanations & correct
   document.getElementById('submitBtn').style.display='none';
   document.getElementById('nextBtn').style.display='inline-block';
   q.options.forEach((_,i)=>{
@@ -523,7 +529,6 @@ function submitQuiz(){
     if(i===sel && sel!==q.correctIndex){ el.style.borderLeftColor='#ef4444'; }
     exp.style.display='block';
   });
-  // NEW: log attempt
   logAttempt(state.currentUser?.id, q.id, q.category, q.section, sel===q.correctIndex);
 }
 function nextQuiz(){
@@ -553,7 +558,7 @@ function logAttempt(userId,qid,category,section,correct){
   audit(`attempt:${userId}:${qid}:${correct?'1':'0'}`);
 }
 
-/* ============================== ADD/EDIT QUESTIONS (unchanged core) ============================== */
+/* ============================== ADD/EDIT QUESTIONS ============================== */
 function openAddQuestion(){
   openModal('Add Question', `
     <div class="u-row">
@@ -673,7 +678,7 @@ function saveStudentYear(){
   alert('Year saved.');
 }
 
-/* ============================== UCY TUTOR WORKSPACE (unchanged) ============================== */
+/* ============================== UCY TUTOR WORKSPACE ============================== */
 function showUCYTutorWorkspace(){
   if(!state.currentUser){ showLogin(); return; }
   if(!(state.currentUser.role==='ucy_tutor'||isSuperadmin())){ showUCYPortal(); return; }
@@ -733,7 +738,7 @@ function showUCYTutorWorkspace(){
   renderMaterialsTable('tutor');
 }
 
-/* ============================== MATERIALS helpers (unchanged) ============================== */
+/* ============================== MATERIALS helpers ============================== */
 function renderSpecialtySelect(id){
   return `<select id="${id}" class="searchbar"><option value="">All / Not set</option>${Object.keys(SPECIALTIES).sort().map(s=>`<option value="${s}">${s}</option>`).join('')}</select>`;
 }
@@ -855,12 +860,11 @@ function guessType(name){
 function downloadUCYDocsList(){
   const headers=['name','specialty','subspecialty','type','size','uploadedBy','uploadedAt','notes'];
   const rows=state.ucyDocs.map(d=>[d.name,d.specialty||'',d.subspecialty||'',fileKind(d),(d.size||0),(state.users.find(u=>u.id===d.uploadedByUserId)?.email||''),new Date(d.uploadedAt).toISOString(),d.notes||'']);
-  const csv=[headers.join(','),...rows.map(r=>r.map(csvEscape).join(','))].join('\n');
+  const csv=[headers.join(',') ,...rows.map(r=>r.map(csvEscape).join(','))].join('\n');
   triggerDownload('ucy_docs.csv',csv);
 }
 
 /* ============================== RANKINGS & ANALYTICS ============================== */
-/* Helpers */
 function getStudentYearByUserId(uid){ const u=state.users.find(x=>x.id===uid); if(!u) return ''; const s=state.students.find(st=>st.email===u.email); return s?.year||''; }
 function computeUserAccuracy(uid, specialty=null){
   const attempts = state.attempts.filter(a=>a.userId===uid && (!specialty || a.category===specialty));
@@ -903,7 +907,6 @@ function showRankings(){
     const yr=getStudentYearByUserId(a.userId); return String(yr)===String(myYear);
   }) : null;
 
-  // Per-specialty summary for me
   const specRows = Object.keys(SPECIALTIES).sort().map(spec=>{
     const my = computeUserAccuracy(meId, spec);
     const mean = computeMeanAccuracy(a=>a.category===spec);
@@ -911,7 +914,6 @@ function showRankings(){
     return {spec, my, mean, delta};
   }).filter(r=>r.my!=null || r.mean!=null);
 
-  // Build filters UI
   const yrOpts = ['All',1,2,3,4,5,6].map(y=>`<option value="${y}">${y}</option>`).join('');
   const specOpts = ['All',...Object.keys(SPECIALTIES).sort()].map(s=>`<option value="${s}">${s}</option>`).join('');
 
@@ -959,7 +961,7 @@ function showRankings(){
       </div>
     </div>`;
 
-  renderLeaderboard(); // initial
+  renderLeaderboard();
 }
 function renderLeaderboard(){
   const specSel=document.getElementById('rk_spec')?.value||'All';
@@ -994,10 +996,7 @@ function renderLeaderboard(){
   if(mount) mount.innerHTML=tbl;
 }
 
-/* ============================== SUPER-ADMIN PANEL (existing) ============================== */
-/* — trimmed: same as previous build, with announcements/banners, users, permissions, flags, taxonomy, audit, maintenance, backup — */
-/* For brevity below, we include the Announcements panel + minimal stubs needed to load Admin. You still have full features from earlier (they’re intact). */
-
+/* ============================== SUPER-ADMIN PANEL (sections) ============================== */
 function showAdminPanel(){
   if(!(state.currentUser && (state.currentUser.role==='admin'||state.currentUser.role==='ucy_staff'))) { showDashboard(); return; }
   const c=document.getElementById('mainContent');
@@ -1025,7 +1024,6 @@ function showAdminPanel(){
   adminShow('announcements');
 }
 
-/* Minimal admin views reused from previous build (kept functional) */
 function adminShow(section){
   const t=document.getElementById('adminContent');
   if(section==='overview'){
@@ -1047,10 +1045,7 @@ function adminShow(section){
   }
 }
 
-/* === Users/Permissions/Flags/Taxonomy/Audit/Maintenance/Backup/Announcements: same as earlier response ===
-   To keep this message compact, those functions are already defined above in your previous build block and remain intact here (we reused them verbatim). */
-
-/* ------------------- Announcements panel (already from previous) ------------------- */
+/* ------------------- Announcements panel ------------------- */
 function renderAnnouncementsPanel(){
   const banners=state.features.banners||[];
   return `<div class="card"><h3>Announcements & Must-Read Banners</h3>
@@ -1138,7 +1133,7 @@ function resetBannerAcks(id){
   audit('banner.acks.reset:'+id); alert('Acknowledgements reset.');
 }
 
-/* ============================== MUST-READ BANNERS ENGINE (as before) ============================== */
+/* ============================== MUST-READ BANNERS ENGINE ============================== */
 let bannerQueue=[], bannerIndex=0;
 function seedDemoBannerOnce(){
   if(localStorage.getItem('seededDemoBanner')) return;
@@ -1167,8 +1162,7 @@ function skipBanner(){ const b=bannerQueue[bannerIndex]; if(b && b.requireAck){ 
 function showBannerModal(){ bannerModal.classList.add('show'); }
 function hideBannerModal(){ bannerModal.classList.remove('show'); }
 
-/* ============================== ADMIN (other helpers from previous build) ============================== */
-/* Users / Roles / Flags / Taxonomy / Audit / Maintenance / Backup helper fns reused */
+/* ============================== ADMIN helpers ============================== */
 function renderUsersAdmin(){
   return `
     <div class="card">
@@ -1405,6 +1399,49 @@ function csvEscape(v){ const s=String(v??''); return /[",\n]/.test(s)?`"${s.repl
 function splitCsv(line){ const out=[]; let cur='',inQ=false; for(let i=0;i<line.length;i++){ const ch=line[i]; if(ch==='\"'){ if(inQ && line[i+1]==='\"'){ cur+='\"'; i++; } else inQ=!inQ; } else if(ch===',' && !inQ){ out.push(cur); cur=''; } else cur+=ch; } out.push(cur); return out; }
 function triggerDownload(filename, content){ const blob=new Blob([content],{type:'application/octet-stream'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
 function audit(msg){ try{ state.auditLog.push({ts:Date.now(), msg}); }catch(_){} }
+
+/* ===== Bulk questions CSV template & import (referenced by buttons) ===== */
+function downloadBulkTemplate(){
+  const headers=['section','category','difficulty','stem','optionA','optionB','optionC','optionD','optionE','correct','expA','expB','expC','expD','expE'];
+  const sample=['SCENARIO','Cardiology','Medium','Chest pain in 58M, next best step?','ECG','CXR','Troponin','Aspirin','Discharge','A','Initial triage tool','Not first-line','Diagnostic','Correct immediate therapy','Unsafe'];
+  const csv=[headers.join(','), sample.map(csvEscape).join(',')].join('\n');
+  triggerDownload('ucy_bulk_questions_template.csv',csv);
+}
+function importBulkQuestions(e){
+  const f=e.target.files?.[0]; if(!f){ alert('No file.'); return; }
+  const r=new FileReader();
+  r.onload=()=>{
+    const lines=r.result.split(/\r?\n/).filter(Boolean);
+    const header=lines.shift().split(',');
+    const required=['section','category','difficulty','stem','optionA','optionB','optionC','optionD','optionE','correct','expA','expB','expC','expD','expE'];
+    const ok = required.every((h,i)=> (header[i]||'').trim().toLowerCase()===h);
+    if(!ok){ alert('Header mismatch. Download template and try again.'); return; }
+    let added=0, errors=0;
+    lines.forEach((line,idx)=>{
+      const cols=splitCsv(line);
+      try{
+        const [section,category,difficulty,stem,A,B,C,D,E,correct,expA,expB,expC,expD,expE]=cols;
+        const map={'A':0,'B':1,'C':2,'D':3,'E':4};
+        const correctIndex= map[String(correct).trim().toUpperCase()];
+        if(!stem || correctIndex==null){ errors++; return; }
+        const id=state.questions.length?Math.max(...state.questions.map(q=>q.id))+1:1;
+        state.questions.push({
+          id, section:section||'SCENARIO', access:'UCY', category:category||'General Practice / Family Medicine',
+          difficulty:difficulty||'Medium', stem, imageUrl:null,
+          options:[A,B,C,D,E], explanations:[expA,expB,expC,expD,expE], correctIndex
+        });
+        added++;
+      }catch{ errors++; }
+    });
+    const mount=document.getElementById('bulkImportReport');
+    if(mount) mount.innerHTML=`<div class="badge badge-green">Imported ${added} question(s). ${errors?errors+' error(s).':''}</div>`;
+  };
+  r.readAsText(f);
+}
+
+/* ===== Impersonation stubs (used by Admin buttons) ===== */
+function sudoAs(uid){ if(!isSuperadmin()) return alert('Need super admin'); if(state.sudoOriginalUser) return alert('Already impersonating'); const u=state.users.find(x=>x.id===uid); if(!u) return; state.sudoOriginalUser=state.currentUser; state.currentUser=u; updateNavigation(); showDashboard(); audit('sudo.as:'+uid); }
+function sudoRevert(){ if(!state.sudoOriginalUser) return; state.currentUser=state.sudoOriginalUser; state.sudoOriginalUser=null; updateNavigation(); showDashboard(); audit('sudo.revert'); }
 </script>
 </body>
 </html>
