@@ -1443,5 +1443,204 @@ function importBulkQuestions(e){
 function sudoAs(uid){ if(!isSuperadmin()) return alert('Need super admin'); if(state.sudoOriginalUser) return alert('Already impersonating'); const u=state.users.find(x=>x.id===uid); if(!u) return; state.sudoOriginalUser=state.currentUser; state.currentUser=u; updateNavigation(); showDashboard(); audit('sudo.as:'+uid); }
 function sudoRevert(){ if(!state.sudoOriginalUser) return; state.currentUser=state.sudoOriginalUser; state.sudoOriginalUser=null; updateNavigation(); showDashboard(); audit('sudo.revert'); }
 </script>
+ <!-- === Persistent Offline Storage (IndexedDB) — paste this just BEFORE </body> === -->
+<script>
+(function(){
+  const DB_NAME = 'medquest_db';
+  const STORE = 'kv';
+  const SNAP_KEY = 'snapshot_v1';
+  let dbp, saving=false, dirty=false, loading=false;
+
+  // --- tiny IndexedDB helpers ---
+  function openDB(){
+    if (dbp) return dbp;
+    dbp = new Promise((resolve, reject)=>{
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = ()=>{ req.result.createObjectStore(STORE); };
+      req.onsuccess = ()=> resolve(req.result);
+      req.onerror = ()=> reject(req.error);
+    });
+    return dbp;
+  }
+  async function idbGet(key){
+    const db = await openDB();
+    return new Promise((resolve, reject)=>{
+      const tx = db.transaction(STORE, 'readonly');
+      const st = tx.objectStore(STORE);
+      const r = st.get(key);
+      r.onsuccess = ()=> resolve(r.result||null);
+      r.onerror = ()=> reject(r.error);
+    });
+  }
+  async function idbPut(key, val){
+    const db = await openDB();
+    return new Promise((resolve, reject)=>{
+      const tx = db.transaction(STORE, 'readwrite');
+      const st = tx.objectStore(STORE);
+      const r = st.put(val, key);
+      r.onsuccess = ()=> resolve(true);
+      r.onerror = ()=> reject(r.error);
+    });
+  }
+
+  // --- mark dirty + debounced save ---
+  let saveTimer=null;
+  function markDirty(){
+    if (loading) return;
+    dirty = true;
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveSnapshot, 800);
+  }
+
+  // --- what we persist (no passwords, no blob URLs) ---
+  function buildSnapshot(){
+    // Avoid storing blob: URLs; keep doc metadata only
+    const ucyDocsMeta = (window.state?.ucyDocs||[]).map(d => {
+      const {url, ...rest} = d;
+      return rest;
+    });
+    return {
+      users: scrubPasswords(window.state?.users||[]),
+      students: window.state?.students||[],
+      ucyDocs: ucyDocsMeta,
+      questions: window.state?.questions||[],
+      attempts: window.state?.attempts||[],
+      features: window.state?.features||{},
+      taxonomy: window.SPECIALTIES||{},
+      banners: (window.state?.features?.banners||[]),
+      ts: Date.now()
+    };
+  }
+  function scrubPasswords(users){
+    return users.map(u=>({ ...u, password: u.password ? '(persisted)' : '' }));
+  }
+  function ensureAdmin(users){
+    if (!users.some(u=>u.role==='admin')) {
+      users.push({
+        id: users.length? Math.max(...users.map(x=>+x.id||0))+1 : 1,
+        email:'admin@medquest.com', password:'admin123',
+        role:'admin', name:'Admin User', subscription:'premium',
+        permissions:{'*':true}, superadmin:true
+      });
+    }
+  }
+
+  async function saveSnapshot(){
+    if (saving || !window.state) return;
+    saving = true;
+    try {
+      const snap = buildSnapshot();
+      await idbPut(SNAP_KEY, snap);
+      // keep attempts mirrored in localStorage for your existing analytics
+      try { localStorage.setItem('attemptsLog', JSON.stringify(window.state.attempts||[])); } catch(_){}
+      dirty = false;
+      console.log('[persist] saved to IndexedDB');
+    } catch(e){
+      console.warn('[persist] save failed', e);
+    } finally {
+      saving = false;
+    }
+  }
+
+  async function loadSnapshot(){
+    loading = true;
+    try {
+      const snap = await idbGet(SNAP_KEY);
+      if (!snap) return false;
+
+      // Merge into running app state & taxonomy
+      if (window.state){
+        if (Array.isArray(snap.users) && snap.users.length) window.state.users = snap.users;
+        ensureAdmin(window.state.users);
+        if (Array.isArray(snap.students)) window.state.students = snap.students;
+        if (Array.isArray(snap.ucyDocs)) {
+          // Re-inject dummy blob URLs so UI still has a link icon (no file bytes persisted here)
+          window.state.ucyDocs = snap.ucyDocs.map(d => ({
+            ...d,
+            url: d.url || '' // not functional across refresh; see note below
+          }));
+        }
+        if (Array.isArray(snap.questions) && snap.questions.length) window.state.questions = snap.questions;
+        if (Array.isArray(snap.attempts)) {
+          window.state.attempts = snap.attempts;
+          try { localStorage.setItem('attemptsLog', JSON.stringify(window.state.attempts)); } catch(_){}
+        }
+        if (snap.features) window.state.features = { ...window.state.features, ...snap.features };
+      }
+      if (snap.taxonomy && window.SPECIALTIES){
+        try { Object.assign(window.SPECIALTIES, snap.taxonomy); } catch(_){}
+      }
+      // refresh top bar/nav if available
+      try { window.updateAnnouncementBar && window.updateAnnouncementBar(); } catch(_){}
+      try { window.updateNavigation && window.updateNavigation(); } catch(_){}
+      console.log('[persist] loaded from IndexedDB');
+      return true;
+    } catch(e){
+      console.warn('[persist] load failed', e);
+      return false;
+    } finally {
+      loading = false;
+    }
+  }
+
+  // --- Wrap mutating functions so they auto-save ---
+  function wrapPersist(fnName){
+    const old = window[fnName];
+    if (typeof old !== 'function') return;
+    window[fnName] = function(...args){
+      const out = old.apply(this, args);
+      // If it returned a Promise, save when it settles
+      if (out && typeof out.then === 'function'){
+        return out.finally(()=>markDirty());
+      }
+      markDirty();
+      return out;
+    };
+  }
+
+  function installWrappers(){
+    [
+      // users
+      'handleRegister','handleLogin','logout',
+      'openCreateUser','createUserSave','openEditUser','saveUserEdits','forcePasswordReset','deleteUserAdmin',
+      // questions
+      'openAddQuestion','saveQuestion','deleteQuestion',
+      // docs
+      'ucyUploadDocsTagged','deleteUCYDoc',
+      // attempts + quiz
+      'logAttempt',
+      // banners & announcements & flags
+      'saveAnnouncement','clearAnnouncement','createBanner','saveBanner','deleteBanner','resetBannerAcks','setFlag',
+      // taxonomy
+      'taxonomyAdd','taxonomyRemove','saveSpecialty',
+      // backup/restore
+      'restoreFromBackup'
+    ].forEach(wrapPersist);
+
+    // Also autosave every few seconds if dirty (belts & braces)
+    setInterval(()=>{ if (dirty && !saving) saveSnapshot(); }, 3000);
+
+    // Save on unload (best-effort)
+    window.addEventListener('beforeunload', ()=>{ if (dirty) saveSnapshot(); }, {capture:true});
+  }
+
+  // boot after your main app has defined window.state et al.
+  function boot(){
+    if (window.state && window.SPECIALTIES){
+      loadSnapshot().then(()=>{
+        installWrappers();
+        // do an initial save so new installs get a baseline snapshot
+        markDirty();
+      });
+    } else {
+      // try again shortly if app JS hasn’t finished
+      setTimeout(boot, 200);
+    }
+  }
+  boot();
+})();
+</script>
+
 </body>
 </html>
+
